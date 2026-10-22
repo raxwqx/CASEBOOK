@@ -1,0 +1,11 @@
+{
+  "dataset": "synthetic-http-lab-001",
+  "source": "offline mock response",
+  "http_status": 200,
+  "headers": {
+    "content-type": "text/html; charset=utf-8",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+  },
+  "note": "Invented training data. No live host was queried."
+}

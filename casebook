@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+# Source-tree launcher. Installed users can run the shorter `casebook` command.
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)" || exit 1
+PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH
+exec python3 -m casebook "$@"

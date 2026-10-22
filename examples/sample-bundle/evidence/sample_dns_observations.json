@@ -1,0 +1,7 @@
+{
+  "dataset": "synthetic-dns-lab-001",
+  "source": "hand-authored mock result",
+  "query_name": "example.invalid",
+  "records": [],
+  "note": "The reserved .invalid suffix is used for documentation and test data."
+}
