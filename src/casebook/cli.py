@@ -88,9 +88,9 @@ def build_parser() -> argparse.ArgumentParser:
     find_add.add_argument("--status", choices=["open", "in_review", "resolved", "false_positive"], default="open")
     find_add.add_argument("--evidence", action="append", default=[], metavar="EVD-ID", help="Link an evidence ID; may be repeated")
 
-    report_parser = sub.add_parser("report", help="Generate a self-contained Markdown, JSON, or HTML report")
+    report_parser = sub.add_parser("report", help="Generate a Markdown, JSON, HTML, or CSV report")
     report_parser.add_argument("case", nargs="?", default=".", help="Case directory (default: current directory)")
-    report_parser.add_argument("--format", choices=["markdown", "md", "json", "html"], default="html")
+    report_parser.add_argument("--format", choices=["markdown", "md", "json", "html", "csv"], default="html")
     report_parser.add_argument("--out", help="Output path (must not already exist)")
 
     doctor_parser = sub.add_parser("doctor", help="Check runtime and required casebook files")
