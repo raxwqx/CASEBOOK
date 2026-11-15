@@ -243,7 +243,7 @@ casebook doctor CASE-001
 
 ## Command reference
 
-Run `casebook --help` for the complete parser-generated help available in your installed version. The reference below documents the commands implemented in version 1.0.0.
+Run `casebook --help` for the complete parser-generated help available in your installed version. The reference below documents the commands implemented in version 5.0.0.
 
 | Command | Purpose |
 |---|---|
@@ -257,7 +257,7 @@ Run `casebook --help` for the complete parser-generated help available in your i
 | `casebook note [CASE] --text TEXT [--kind KIND] [--when ISO-8601]` | Record an analyst note. Kinds: `observation`, `action`, `decision`, `question`, `context`. |
 | `casebook timeline [CASE]` | Display a case timeline. |
 | `casebook finding add [CASE] --title TEXT --severity LEVEL --description TEXT [--status STATUS] [--evidence EVD-ID]...` | Record an analyst finding, optionally linked to existing evidence IDs. |
-| `casebook report [CASE] [--format html\|markdown\|md\|json] [--out PATH]` | Generate a report. The default format is `html`. |
+| `casebook report [CASE] [--format html\|markdown\|md\|json] [--out PATH]` | Generate a report. The default format is `html`; `csv` exports a flat register for spreadsheet review. |
 | `casebook doctor [CASE]` | Check the local runtime; if a case is supplied, also verify its integrity. |
 
 ### `init` — create a case
@@ -325,7 +325,7 @@ casebook report CASE-002 --format markdown --out ./case-002-report.md
 casebook report CASE-002 --format json --out ./case-002-report.json
 ```
 
-Supported formats are `html`, `markdown`, the alias `md`, and `json`. If `--out` is omitted, CASEBOOK chooses a filename under the case's `reports/` directory. Existing output paths are not overwritten. A report can still be generated when integrity issues exist, but the command returns a non-zero status and the report warns about the issues; review it before use.
+Supported formats are `html`, `markdown`, the alias `md`, `json`, and `csv`. If `--out` is omitted, CASEBOOK chooses a filename under the case's `reports/` directory. Existing output paths are not overwritten. A report can still be generated when integrity issues exist, but the command returns a non-zero status and the report warns about the issues; review it before use.
 
 ### `NO_COLOR` — disable ANSI color output
 
@@ -425,7 +425,7 @@ casebook-bundle.zip
 - Treat `manifest.json` as **untrusted descriptive text**. Version 1.0.0 does not execute it or use it as trusted instructions.
 - Keep the original ZIP and its derived files distinct. CASEBOOK preserves the input archive and extracts accepted members into a separate evidence tree.
 
-### ZIP import safety limits in version 1.0.0
+### ZIP import safety limits in version 5.0.0
 
 | Limit | Default |
 |---|---:|
