@@ -30,7 +30,7 @@ def collect_report_data(case_path: str | Path) -> dict[str, Any]:
 def _write_csv_row(writer: csv.writer, values: list[Any]) -> None:
     safe_values = []
     for value in values:
-        if isinstance(value, str) and value.lstrip(" \\t\\r\\n")[:1] in {"=", "+", "-", "@"}:
+        if isinstance(value, str) and value.lstrip(" \t\r\n")[:1] in {"=", "+", "-", "@"}:
             value = "'" + value
         safe_values.append(value)
     writer.writerow(safe_values)
