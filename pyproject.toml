@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "casebook-dfir"
-version = "1.0.0"
+version = "5.0.0"
 description = "Offline-first digital forensics case workspace with evidence integrity checks and reproducible reports"
 readme = "README.md"
 requires-python = ">=3.10"
