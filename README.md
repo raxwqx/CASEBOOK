@@ -257,7 +257,7 @@ Run `casebook --help` for the complete parser-generated help available in your i
 | `casebook note [CASE] --text TEXT [--kind KIND] [--when ISO-8601]` | Record an analyst note. Kinds: `observation`, `action`, `decision`, `question`, `context`. |
 | `casebook timeline [CASE]` | Display a case timeline. |
 | `casebook finding add [CASE] --title TEXT --severity LEVEL --description TEXT [--status STATUS] [--evidence EVD-ID]...` | Record an analyst finding, optionally linked to existing evidence IDs. |
-| `casebook report [CASE] [--format html\|markdown\|md\|json] [--out PATH]` | Generate a report. The default format is `html`; `csv` exports a flat register for spreadsheet review. |
+| `casebook report [CASE] [--format html\|markdown\|md\|json\|csv] [--out PATH]` | Generate a report. The default format is `html`; `csv` exports a flat register for spreadsheet review. |
 | `casebook doctor [CASE]` | Check the local runtime; if a case is supplied, also verify its integrity. |
 
 ### `init` — create a case
@@ -325,7 +325,13 @@ casebook report CASE-002 --format markdown --out ./case-002-report.md
 casebook report CASE-002 --format json --out ./case-002-report.json
 ```
 
-Supported formats are `html`, `markdown`, the alias `md`, `json`, and `csv`. If `--out` is omitted, CASEBOOK chooses a filename under the case's `reports/` directory. Existing output paths are not overwritten. A report can still be generated when integrity issues exist, but the command returns a non-zero status and the report warns about the issues; review it before use.
+Supported formats are `html`, `markdown`, the alias `md`, `json`, and `csv`. CSV contains one row per case, evidence item, finding, or timeline event, with stable columns for spreadsheet filtering. Text cells beginning with spreadsheet formula markers are prefixed safely before export. For example:
+
+```bash
+casebook report CASE-001 --format csv --out reports/CASE-001.csv
+```
+
+If `--out` is omitted, CASEBOOK chooses a filename under the case's `reports/` directory. Existing output paths are not overwritten. A report can still be generated when integrity issues exist, but the command returns a non-zero status and the report warns about the issues; review it before use.
 
 ### `NO_COLOR` — disable ANSI color output
 

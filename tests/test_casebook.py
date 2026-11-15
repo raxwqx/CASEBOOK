@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import csv
 import json
 import stat
 import tempfile
@@ -20,7 +21,7 @@ from casebook.core import (
     verify_case,
 )
 from casebook.integrity import GENESIS_HASH, append_audit, audit_event_hash, sha256_file, verify_audit
-from casebook.reports import render_html, render_json, render_markdown, write_report
+from casebook.reports import render_csv, render_html, render_json, render_markdown, write_report
 
 
 class CasebookTestCase(unittest.TestCase):
@@ -294,6 +295,16 @@ class CasebookTestCase(unittest.TestCase):
         self.assertIn('"evidence"', render_json(data))
         self.assertIn("Synthetic finding", render_html(data))
         self.assertIn("<style>", render_html(data))
+
+    def test_csv_report_is_flat_and_neutralizes_spreadsheet_formulas(self) -> None:
+        from casebook.reports import collect_report_data
+
+        data = collect_report_data(self.root)
+        data["timeline"] = [{"sequence": 1, "when": "now", "label": "\t=HYPERLINK(\"https://example.invalid\")", "kind": "observation", "source": "analyst"}]
+        rows = list(csv.reader(io.StringIO(render_csv(data))))
+        self.assertEqual(rows[0][0], "record_type")
+        note_row = next(row for row in rows if row[0] == "timeline")
+        self.assertEqual(note_row[3], "'\t=HYPERLINK(\"https://example.invalid\")")
 
     def test_html_report_escapes_untrusted_input(self) -> None:
         add_note(self.root, "<script>alert('x')</script>")
