@@ -1,7 +1,9 @@
 """Safe, self-contained case report renderers."""
 from __future__ import annotations
 
+import csv
 import html
+import io
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +26,34 @@ def collect_report_data(case_path: str | Path) -> dict[str, Any]:
         "audit": read_jsonl(root / "audit" / "events.jsonl"),
     }
 
+
+def _write_csv_row(writer: csv.writer, values: list[Any]) -> None:
+    safe_values = []
+    for value in values:
+        if isinstance(value, str) and value.lstrip(" \\t\\r\\n")[:1] in {"=", "+", "-", "@"}:
+            value = "'" + value
+        safe_values.append(value)
+    writer.writerow(safe_values)
+
+
+def render_csv(data: dict[str, Any]) -> str:
+    """Render a flat, spreadsheet-friendly register of case records."""
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\n")
+    _write_csv_row(writer, [
+        "record_type", "record_id", "timestamp", "title", "status", "severity",
+        "source", "description", "sha256", "size_bytes", "evidence_ids",
+    ])
+    case = data["case"]
+    _write_csv_row(writer, ["case", case.get("case_id", ""), case.get("created_at", ""), case.get("title", ""), case.get("status", ""), "", case.get("analyst", ""), case.get("description", ""), "", "", ""])
+    for item in data.get("evidence", []):
+        _write_csv_row(writer, ["evidence", item.get("evidence_id", ""), item.get("acquired_at", ""), item.get("filename", ""), item.get("kind", ""), "", item.get("source", ""), item.get("note", ""), item.get("sha256", ""), item.get("size_bytes", ""), ""])
+    for item in data.get("findings", []):
+        evidence_ids = ";".join(str(value) for value in item.get("evidence_ids", []))
+        _write_csv_row(writer, ["finding", item.get("finding_id", ""), item.get("created_at", ""), item.get("title", ""), item.get("status", ""), item.get("severity", ""), "analyst", item.get("description", ""), "", "", evidence_ids])
+    for item in data.get("timeline", []):
+        _write_csv_row(writer, ["timeline", item.get("sequence", ""), item.get("when", ""), item.get("label", ""), item.get("kind", ""), "", item.get("source", ""), "", "", "", ""])
+    return output.getvalue()
 
 def render_json(data: dict[str, Any]) -> str:
     return json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
@@ -162,8 +192,10 @@ def write_report(case_path: str | Path, fmt: str, out: str | Path | None = None)
         ext, content = "json", render_json(data)
     elif fmt == "html":
         ext, content = "html", render_html(data)
+    elif fmt == "csv":
+        ext, content = "csv", render_csv(data)
     else:
-        raise ValueError("Report format must be markdown, json, or html.")
+        raise ValueError("Report format must be markdown, json, html, or csv.")
     if out:
         destination = Path(out).expanduser().resolve()
     else:
