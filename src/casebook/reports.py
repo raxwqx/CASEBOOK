@@ -3,25 +3,63 @@ from __future__ import annotations
 
 import html
 import json
+import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .core import load_case, timeline, verify_case
-from .integrity import read_jsonl, utc_now
+from .core import load_case, timeline_from_events, verify_case
+from .integrity import read_jsonl, sha256_bytes, utc_now
+
+REPORT_SCHEMA_VERSION = 2
+MAX_REPORT_SIZE_BYTES = 64 * 1024 * 1024
+
+
+def _safe_int(value: Any) -> int:
+    """Render a byte count defensively; tampered indexes may hold any JSON type."""
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value if value >= 0 else 0
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return 0
+
+
+def _collect_index(path: Path, errors: list[str]) -> list[dict[str, Any]]:
+    try:
+        return read_jsonl(path)
+    except (ValueError, OSError) as exc:
+        errors.append(f"Cannot read {path.name}: {exc}")
+        return []
 
 
 def collect_report_data(case_path: str | Path) -> dict[str, Any]:
     root, metadata = load_case(case_path)
+    errors: list[str] = []
+    evidence = _collect_index(root / "evidence" / "index.jsonl", errors)
+    findings = _collect_index(root / "findings" / "findings.jsonl", errors)
+    audit = _collect_index(root / "audit" / "events.jsonl", errors)
+    # Build the timeline from the already collected audit records so a damaged
+    # index cannot prevent an integrity-failure report from being produced.
+    collection_errors: list[str] = []
+    try:
+        events = timeline_from_events(audit)
+    except (ValueError, OSError) as exc:
+        events = []
+        collection_errors.append(f"Cannot build timeline: {exc}")
+    integrity = verify_case(root)
     return {
-        "report_schema_version": 1,
+        "report_schema_version": REPORT_SCHEMA_VERSION,
         "generated_at": utc_now(),
         "case": metadata,
-        "integrity": verify_case(root),
-        "evidence": read_jsonl(root / "evidence" / "index.jsonl"),
-        "findings": read_jsonl(root / "findings" / "findings.jsonl"),
-        "timeline": timeline(root),
-        "audit": read_jsonl(root / "audit" / "events.jsonl"),
+        "integrity": integrity,
+        "collection_errors": errors + collection_errors,
+        "evidence": evidence,
+        "findings": findings,
+        "timeline": events,
+        "audit": audit,
     }
 
 
@@ -54,12 +92,15 @@ def render_markdown(data: dict[str, Any]) -> str:
     if integrity["issues"]:
         lines += ["", "### Integrity issues", ""]
         lines.extend(f"- {issue}" for issue in integrity["issues"])
+    if data.get("collection_errors"):
+        lines += ["", "### Record collection problems", ""]
+        lines.extend(f"- {issue}" for issue in data["collection_errors"])
     lines += ["", "## Evidence register", ""]
     if data["evidence"]:
         lines += ["| ID | Filename | SHA-256 | Size (bytes) | Type |", "|---|---|---|---:|---|"]
         for record in data["evidence"]:
             filename = str(record.get("filename", "")).replace("|", "\\|").replace("\n", " ")
-            lines.append(f"| {record.get('evidence_id')} | {filename} | `{record.get('sha256')}` | {record.get('size_bytes')} | {record.get('kind')} |")
+            lines.append(f"| {record.get('evidence_id')} | {filename} | `{record.get('sha256')}` | {_safe_int(record.get('size_bytes'))} | {record.get('kind')} |")
     else:
         lines.append("No evidence has been registered.")
     lines += ["", "## Findings", ""]
@@ -108,7 +149,7 @@ def render_html(data: dict[str, Any]) -> str:
     evidence_rows = "".join(
         "<tr><td>{}</td><td>{}</td><td><code>{}</code></td><td>{:,}</td><td>{}</td></tr>".format(
             html.escape(str(r.get("evidence_id", ""))), html.escape(str(r.get("filename", ""))),
-            html.escape(str(r.get("sha256", ""))), int(r.get("size_bytes", 0)), html.escape(str(r.get("kind", "")))
+            html.escape(str(r.get("sha256", ""))), _safe_int(r.get("size_bytes")), html.escape(str(r.get("kind", "")))
         ) for r in data["evidence"]
     ) or '<tr><td colspan="5" class="muted">No evidence registered.</td></tr>'
     finding_cards: list[str] = []
@@ -131,6 +172,10 @@ def render_html(data: dict[str, Any]) -> str:
         ) for e in data["timeline"]
     ) or '<tr><td colspan="4" class="muted">No timeline events recorded.</td></tr>'
     issues_html = "".join(f"<li>{html.escape(str(issue))}</li>" for issue in integrity["issues"])
+    collection_html = "".join(f"<li>{html.escape(str(issue))}</li>" for issue in data.get("collection_errors", []))
+    collection_section = (
+        '<section class="section"><h2>Record collection problems</h2><ul>' + collection_html + "</ul></section>"
+    ) if collection_html else ""
     return f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark"><title>CASEBOOK | {html.escape(str(case.get("title", "Case report")))}</title>
@@ -144,12 +189,26 @@ main{{max-width:1100px;margin:auto;padding:42px 22px 70px}}.eyebrow{{text-transf
 <div class="meta-grid"><div class="card"><div class="label">Analyst</div><div class="value">{html.escape(str(case.get("analyst", "unspecified")))}</div></div><div class="card"><div class="label">Created (UTC)</div><div class="value">{html.escape(str(case.get("created_at", "unknown")))}</div></div><div class="card"><div class="label">Case status</div><div class="value">{html.escape(str(case.get("status", "unknown")).upper())}</div></div></div>
 <div class="metrics"><div class="card"><div class="label">Integrity</div><div class="metric {status_class}">{'PASS' if ok else 'FAIL'}</div></div><div class="card"><div class="label">Original evidence</div><div class="metric">{integrity['evidence_count']}</div></div><div class="card"><div class="label">Derived files checked</div><div class="metric">{integrity['checked_files']}</div></div><div class="card"><div class="label">Audit entries</div><div class="metric">{integrity['audit_count']}</div></div></div>
 {('<section class="section"><h2>Integrity issues</h2><ul>'+issues_html+'</ul></section>') if integrity['issues'] else ''}
+{collection_section}
 <section class="section"><h2>Evidence register</h2><div class="table-wrap"><table><thead><tr><th>ID</th><th>Filename</th><th>SHA-256</th><th>Bytes</th><th>Kind</th></tr></thead><tbody>{evidence_rows}</tbody></table></div></section>
 <section class="section"><h2>Findings</h2>{findings_html}</section>
 <section class="section"><h2>Timeline</h2><div class="table-wrap"><table><thead><tr><th>Time</th><th>Type</th><th>Event</th><th>Source / detail</th></tr></thead><tbody>{timeline_rows}</tbody></table></div></section>
 <section class="section"><h2>Methodology & limitations</h2><p>Original inputs are preserved and hashed with SHA-256. Permitted ZIP members are extracted as derived evidence under size and path restrictions. The audit journal's hash chain can reveal accidental or unsophisticated changes, but is not tamper-proof against an actor able to rewrite the entire local journal. Matching hashes prove byte consistency with the recorded digest, not authorship, original creation time, or factual truth.</p></section>
 <div class="note">This report summarizes records held in the local CASEBOOK workspace. It is not a legal certification of chain of custody.</div>
 <footer>Generated offline by CASEBOOK · {html.escape(str(data["generated_at"]))}</footer></main></body></html>'''
+
+
+def _default_report_path(root: Path, safe_id: str, ext: str) -> Path:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    reports_dir = root / "reports"
+    candidate = reports_dir / f"{safe_id}_{stamp}.{ext}"
+    counter = 2
+    # Microsecond precision makes collisions unlikely; the loop keeps two
+    # reports created in the same clock tick from failing the second export.
+    while candidate.exists():
+        candidate = reports_dir / f"{safe_id}_{stamp}-{counter}.{ext}"
+        counter += 1
+    return candidate
 
 
 def write_report(case_path: str | Path, fmt: str, out: str | Path | None = None) -> tuple[Path, dict[str, Any]]:
@@ -167,17 +226,29 @@ def write_report(case_path: str | Path, fmt: str, out: str | Path | None = None)
     if out:
         destination = Path(out).expanduser().resolve()
     else:
-        safe_id = str(metadata.get("case_id", "case")).replace("/", "_")
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        destination = root / "reports" / f"{safe_id}_{stamp}.{ext}"
+        safe_id = re.sub(r"[^A-Za-z0-9._-]", "_", str(metadata.get("case_id", "case"))) or "case"
+        destination = _default_report_path(root, safe_id, ext)
     destination.parent.mkdir(parents=True, exist_ok=True)
     # Never silently overwrite prior reports.
     if destination.exists():
         raise FileExistsError(f"Report destination already exists: {destination}")
-    with destination.open("x", encoding="utf-8", newline="\n") as stream:
-        stream.write(content)
-    from .integrity import append_audit
+    encoded = content.encode("utf-8")
+    if len(encoded) > MAX_REPORT_SIZE_BYTES:
+        raise ValueError("Generated report exceeds CASEBOOK's 64 MiB report limit.")
+    with destination.open("xb") as stream:
+        stream.write(encoded)
+        stream.flush()
+        os.fsync(stream.fileno())
     from .core import _write_case_metadata
-    append_audit(root, "report.generated", {"format": ext, "path": str(destination), "sha256": __import__("hashlib").sha256(content.encode("utf-8")).hexdigest()})
-    _write_case_metadata(root, metadata)
-    return destination, data["integrity"]
+    integrity = data["integrity"]
+    integrity["report_audit_recorded"] = True
+    try:
+        from .integrity import append_audit
+        append_audit(root, "report.generated", {"format": ext, "path": str(destination), "sha256": sha256_bytes(encoded)})
+    except (ValueError, OSError):
+        # The report is already durable. A damaged audit journal must not hide
+        # the report that documents the integrity failure.
+        integrity["report_audit_recorded"] = False
+    else:
+        _write_case_metadata(root, metadata)
+    return destination, integrity

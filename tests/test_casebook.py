@@ -8,10 +8,12 @@ import unittest
 import zipfile
 from pathlib import Path
 from contextlib import redirect_stdout, redirect_stderr
+from unittest.mock import patch
 
 from casebook.cli import main
 from casebook.core import (
     CasebookError,
+    _safe_name,
     add_evidence,
     add_finding,
     add_note,
@@ -19,8 +21,16 @@ from casebook.core import (
     timeline,
     verify_case,
 )
-from casebook.integrity import GENESIS_HASH, append_audit, audit_event_hash, sha256_file, verify_audit
-from casebook.reports import render_html, render_json, render_markdown, write_report
+from casebook.digest import export_digest, verify_digest
+from casebook.integrity import (
+    GENESIS_HASH,
+    append_audit,
+    append_jsonl,
+    audit_event_hash,
+    sha256_file,
+    verify_audit,
+)
+from casebook.reports import collect_report_data, render_html, render_json, render_markdown, write_report
 
 
 class CasebookTestCase(unittest.TestCase):
@@ -332,6 +342,17 @@ class CasebookTestCase(unittest.TestCase):
         self.assertIn("C A S E B O O K", output.getvalue())
         self.assertIn("casebook init", output.getvalue())
 
+    def test_cli_home_survives_a_legacy_non_utf8_console(self) -> None:
+        buffer = io.BytesIO()
+        stream = io.TextIOWrapper(buffer, encoding="cp1252", errors="strict")
+        with redirect_stdout(stream):
+            code = main([])
+        stream.flush()
+        rendered = buffer.getvalue().decode("cp1252")
+        self.assertEqual(code, 0)
+        self.assertIn("C A S E B O O K", rendered)
+        self.assertIn("casebook init", rendered)
+
     def test_cli_init_and_verify(self) -> None:
         target = self.base / "CLI-CASE"
         output = io.StringIO()
@@ -387,6 +408,186 @@ class CasebookTestCase(unittest.TestCase):
         add_note(self.root, "Earlier", event_time="2026-10-22T00:00:00Z")
         events = timeline(self.root)
         self.assertEqual([e["label"] for e in events], ["Earlier", "Later"])
+
+    def test_default_report_names_are_unique_within_one_clock_tick(self) -> None:
+        first, first_integrity = write_report(self.root, "html")
+        second, second_integrity = write_report(self.root, "html")
+        self.assertNotEqual(first, second)
+        self.assertTrue(first.is_file())
+        self.assertTrue(second.is_file())
+        self.assertTrue(first_integrity["ok"])
+        self.assertTrue(second_integrity["ok"])
+
+    def test_report_is_generated_when_findings_index_is_damaged(self) -> None:
+        add_evidence(self.root, self.write_input())
+        (self.root / "findings/findings.jsonl").write_text("{broken json\n", encoding="utf-8")
+        output = self.root / "reports/damaged-index.md"
+        path, integrity = write_report(self.root, "md", output)
+        self.assertTrue(path.is_file())
+        self.assertFalse(integrity["ok"])
+        self.assertTrue(any("findings.jsonl" in issue for issue in integrity["issues"]))
+        rendered = path.read_text(encoding="utf-8")
+        self.assertIn("Record collection problems", rendered)
+        self.assertIn("FAIL", rendered)
+
+    def test_report_is_generated_when_audit_index_is_damaged(self) -> None:
+        add_evidence(self.root, self.write_input())
+        (self.root / "audit/events.jsonl").write_text("{broken json\n", encoding="utf-8")
+        output = self.root / "reports/damaged-audit.html"
+        path, integrity = write_report(self.root, "html", output)
+        self.assertTrue(path.is_file())
+        self.assertFalse(integrity["ok"])
+        self.assertFalse(integrity["report_audit_recorded"])
+        self.assertIn("Record collection problems", path.read_text(encoding="utf-8"))
+
+    def test_report_renderers_handle_non_numeric_evidence_size(self) -> None:
+        add_evidence(self.root, self.write_input())
+        index = self.root / "evidence/index.jsonl"
+        record = json.loads(index.read_text(encoding="utf-8").strip())
+        record["size_bytes"] = "not-a-number"
+        index.write_text(json.dumps(record) + "\n", encoding="utf-8")
+        data = collect_report_data(self.root)
+        self.assertIn("Evidence register", render_markdown(data))
+        rendered = render_html(data)
+        self.assertIn("EVD-0001", rendered)
+        self.assertNotIn(">not-a-number</td>", rendered)
+
+    def test_note_ids_use_highest_existing_number(self) -> None:
+        add_note(self.root, "First")
+        add_note(self.root, "Second")
+        events_path = self.root / "timeline/events.jsonl"
+        lines = events_path.read_text(encoding="utf-8").splitlines()
+        events_path.write_text(lines[1] + "\n", encoding="utf-8")
+        third = add_note(self.root, "Third")
+        self.assertEqual(third["note_id"], "NOTE-0003")
+
+    def test_finding_ids_use_highest_existing_number(self) -> None:
+        add_finding(self.root, "First", "low", "First description")
+        add_finding(self.root, "Second", "low", "Second description")
+        findings_path = self.root / "findings/findings.jsonl"
+        lines = findings_path.read_text(encoding="utf-8").splitlines()
+        findings_path.write_text(lines[1] + "\n", encoding="utf-8")
+        third = add_finding(self.root, "Third", "low", "Third description")
+        self.assertEqual(third["finding_id"], "FND-0003")
+
+    def test_safe_name_avoids_windows_reserved_device_names(self) -> None:
+        self.assertEqual(_safe_name("CON.txt"), "_CON.txt")
+        self.assertEqual(_safe_name("aux"), "_aux")
+        self.assertEqual(_safe_name("LPT9.log"), "_LPT9.log")
+
+    def test_zip_rejects_windows_unsafe_member_names(self) -> None:
+        for member in ("CON.txt", "aux", "bad<name.txt", "trailing.", "control\x01.txt"):
+            with self.subTest(member=member):
+                source = self.make_zip(self.input_dir / f"unsafe-{abs(hash(member))}.zip", [(member, b"x")])
+                with self.assertRaises(CasebookError):
+                    add_evidence(self.root, source)
+
+    def test_zip_still_accepts_safe_nested_member_names(self) -> None:
+        source = self.make_zip(self.input_dir / "safe-names.zip", [
+            ("bundle/README.md", b"readme"),
+            ("bundle/evidence/log-01.json", b"{}"),
+        ])
+        record = add_evidence(self.root, source)
+        self.assertEqual(record["derived_count"], 2)
+
+    def test_append_jsonl_flushes_and_syncs(self) -> None:
+        path = self.base / "append.jsonl"
+        with patch("casebook.integrity.os.fsync") as fsync:
+            append_jsonl(path, {"value": 1})
+        fsync.assert_called_once()
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"value": 1})
+
+    def test_digest_export_and_verify_round_trip(self) -> None:
+        source = self.make_zip(self.input_dir / "digest-bundle.zip", [
+            ("bundle/a.txt", b"alpha"),
+            ("bundle/b.txt", b"beta"),
+        ])
+        record = add_evidence(self.root, source)
+        add_finding(self.root, "Digest finding", "medium", "Synthetic", evidence_ids=[record["evidence_id"]])
+        add_note(self.root, "Digest note")
+        output = self.base / "CASE-TEST.digest.json"
+        path, manifest, audit_recorded = export_digest(self.root, output)
+        self.assertTrue(path.is_file())
+        self.assertTrue(audit_recorded)
+        self.assertEqual(manifest["manifest_format"], "casebook-digest-v1")
+        self.assertEqual(len(manifest["digest"]), 64)
+        self.assertEqual(manifest["counts"]["evidence"], 1)
+        self.assertEqual(manifest["counts"]["derived"], 2)
+        result = verify_digest(self.root, output)
+        self.assertTrue(result["ok"], result["problems"])
+
+    def test_digest_verification_still_passes_after_a_new_report(self) -> None:
+        add_evidence(self.root, self.write_input())
+        output = self.base / "before-report.digest.json"
+        export_digest(self.root, output)
+        write_report(self.root, "md")
+        result = verify_digest(self.root, output)
+        self.assertTrue(result["ok"], result["problems"])
+
+    def test_digest_verification_detects_changed_evidence_bytes(self) -> None:
+        record = add_evidence(self.root, self.write_input())
+        output = self.base / "tamper.digest.json"
+        export_digest(self.root, output)
+        (self.root / record["stored_path"]).write_bytes(b"changed after export")
+        result = verify_digest(self.root, output)
+        self.assertFalse(result["ok"])
+        self.assertTrue(any("integrity" in problem.lower() for problem in result["problems"]))
+
+    def test_digest_verification_detects_manifest_tampering(self) -> None:
+        add_evidence(self.root, self.write_input())
+        output = self.base / "manifest.digest.json"
+        export_digest(self.root, output)
+        manifest = json.loads(output.read_text(encoding="utf-8"))
+        manifest["case"]["title"] = "Rewritten title"
+        output.write_text(json.dumps(manifest), encoding="utf-8")
+        result = verify_digest(self.root, output)
+        self.assertFalse(result["ok"])
+        self.assertTrue(any("Manifest digest" in problem for problem in result["problems"]))
+
+    def test_digest_verification_detects_truncated_audit_journal(self) -> None:
+        add_evidence(self.root, self.write_input())
+        output = self.base / "truncated.digest.json"
+        export_digest(self.root, output)
+        audit = self.root / "audit/events.jsonl"
+        lines = audit.read_text(encoding="utf-8").splitlines()
+        audit.write_text("\n".join(lines[:-2]) + "\n", encoding="utf-8")
+        result = verify_digest(self.root, output)
+        self.assertFalse(result["ok"])
+        self.assertTrue(any("shorter than the anchored snapshot" in problem for problem in result["problems"]))
+
+    def test_digest_export_refuses_to_overwrite(self) -> None:
+        output = self.base / "existing.digest.json"
+        output.write_text("keep me", encoding="utf-8")
+        with self.assertRaises(FileExistsError):
+            export_digest(self.root, output)
+        self.assertEqual(output.read_text(encoding="utf-8"), "keep me")
+
+    def test_cli_digest_export_and_verify(self) -> None:
+        add_evidence(self.root, self.write_input())
+        output = self.base / "cli.digest.json"
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            code = main(["digest", str(self.root), "--out", str(output)])
+        self.assertEqual(code, 0, stdout.getvalue())
+        self.assertIn("Digest manifest written", stdout.getvalue())
+
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            code = main(["digest", str(self.root), "--verify", str(output)])
+        self.assertEqual(code, 0, stdout.getvalue())
+        self.assertIn("Digest verification PASSED", stdout.getvalue())
+
+    def test_cli_digest_verify_reports_failure(self) -> None:
+        add_evidence(self.root, self.write_input())
+        output = self.base / "failing.digest.json"
+        export_digest(self.root, output)
+        output.write_text(output.read_text(encoding="utf-8").replace("1.1.0", "9.9.9"), encoding="utf-8")
+        stdout = io.StringIO()
+        errors = io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(errors):
+            code = main(["digest", str(self.root), "--verify", str(output)])
+        self.assertEqual(code, 2)
+        self.assertIn("Digest verification FAILED", errors.getvalue())
 
 
 if __name__ == "__main__":

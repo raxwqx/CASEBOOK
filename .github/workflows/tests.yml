@@ -30,3 +30,9 @@ jobs:
       - name: Verify package entry point
         run: python -m casebook --version
         working-directory: .
+      - name: Verify digest export and verification
+        run: |
+          python -m casebook init .ci-casebook --title "CI digest smoke test"
+          python -m casebook add .ci-casebook examples/casebook-demo-bundle.zip --source "CI smoke test"
+          python -m casebook digest .ci-casebook --out .ci-casebook.digest.json
+          python -m casebook digest .ci-casebook --verify .ci-casebook.digest.json

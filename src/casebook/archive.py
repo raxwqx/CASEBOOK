@@ -12,9 +12,34 @@ MAX_MEMBER_BYTES = 100 * 1024 * 1024
 MAX_TOTAL_UNCOMPRESSED = 512 * 1024 * 1024
 MAX_COMPRESSION_RATIO = 200
 
+# Device names that Windows resolves regardless of extension. Extracting a
+# member called "CON.txt" or "aux" would not create an ordinary file there.
+WINDOWS_RESERVED_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{index}" for index in range(1, 10)}
+    | {f"LPT{index}" for index in range(1, 10)}
+)
+WINDOWS_FORBIDDEN_CHARS = frozenset('<>:"|?*')
+MAX_WINDOWS_PART_LENGTH = 255
+
 
 class UnsafeArchiveError(ValueError):
     """Raised when an archive violates CASEBOOK's conservative import limits."""
+
+
+def _validate_windows_part(part: str, raw_name: str) -> None:
+    """Reject names that cannot be materialized safely on Windows."""
+    if any(ord(character) < 32 for character in part):
+        raise UnsafeArchiveError(f"Control character in archive path rejected: {raw_name!r}")
+    if any(character in WINDOWS_FORBIDDEN_CHARS for character in part):
+        raise UnsafeArchiveError(f"Windows-incompatible character in archive path rejected: {raw_name!r}")
+    if part.endswith((" ", ".")):
+        raise UnsafeArchiveError(f"Archive path ending in a space or dot rejected: {raw_name!r}")
+    if len(part) > MAX_WINDOWS_PART_LENGTH:
+        raise UnsafeArchiveError(f"Archive path component is too long: {raw_name!r}")
+    stem = part.split(".", 1)[0].rstrip(" ").upper()
+    if stem in WINDOWS_RESERVED_NAMES:
+        raise UnsafeArchiveError(f"Windows reserved device name rejected: {raw_name!r}")
 
 
 def _safe_member_name(raw_name: str) -> str | None:
@@ -31,6 +56,8 @@ def _safe_member_name(raw_name: str) -> str | None:
         raise UnsafeArchiveError(f"Path traversal rejected: {raw_name!r}")
     if any(part in (".",) for part in path.parts):
         raise UnsafeArchiveError(f"Non-canonical archive path rejected: {raw_name!r}")
+    for part in path.parts:
+        _validate_windows_part(part, raw_name)
     clean = path.as_posix()
     if clean == ".":
         return None

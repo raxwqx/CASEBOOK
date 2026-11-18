@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .archive import UnsafeArchiveError, extract_validated, inspect_archive
+from .archive import WINDOWS_RESERVED_NAMES, UnsafeArchiveError, extract_validated, inspect_archive
 from .integrity import append_audit, append_jsonl, read_jsonl, sha256_file, utc_now, verify_audit
 
 SCHEMA_VERSION = 1
@@ -135,6 +135,9 @@ def _safe_name(name: str, fallback: str = "evidence.bin") -> str:
     name = re.sub(r"\s+", "_", name)
     if not name or name in {".", ".."}:
         name = fallback
+    # A name such as "CON.txt" is a device name on Windows, not a regular file.
+    if name.split(".", 1)[0].upper() in WINDOWS_RESERVED_NAMES:
+        name = f"_{name}"
     return name[:120]
 
 
@@ -146,6 +149,26 @@ def _next_evidence_id(root: Path) -> str:
         if match:
             highest = max(highest, int(match.group(1)))
     return f"EVD-{highest + 1:04d}"
+
+
+def _next_note_id(root: Path) -> str:
+    records = read_jsonl(root / "timeline" / "events.jsonl")
+    highest = 0
+    for record in records:
+        match = re.fullmatch(r"NOTE-(\d{4,})", str(record.get("note_id", "")))
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return f"NOTE-{highest + 1:04d}"
+
+
+def _next_finding_id(root: Path) -> str:
+    records = read_jsonl(root / "findings" / "findings.jsonl")
+    highest = 0
+    for record in records:
+        match = re.fullmatch(r"FND-(\d{4,})", str(record.get("finding_id", "")))
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return f"FND-{highest + 1:04d}"
 
 
 def _write_case_metadata(root: Path, metadata: dict[str, Any]) -> None:
@@ -303,7 +326,7 @@ def add_note(case_path: str | Path, text: str, kind: str = "observation", event_
         raise CasebookError(f"Unknown note kind '{kind}'. Choose: {', '.join(sorted(NOTE_KINDS))}.")
     when = event_time or utc_now()
     record = {
-        "note_id": f"NOTE-{len(read_jsonl(root / 'timeline' / 'events.jsonl')) + 1:04d}",
+        "note_id": _next_note_id(root),
         "recorded_at": utc_now(),
         "event_time": when,
         "kind": kind,
@@ -334,7 +357,7 @@ def add_finding(case_path: str | Path, title: str, severity: str, description: s
     if missing:
         raise CasebookError(f"Unknown evidence ID(s): {', '.join(missing)}")
     record = {
-        "finding_id": f"FND-{len(read_jsonl(root / 'findings' / 'findings.jsonl')) + 1:04d}",
+        "finding_id": _next_finding_id(root),
         "created_at": utc_now(),
         "title": title,
         "severity": severity,
@@ -484,7 +507,10 @@ def verify_case(case_path: str | Path) -> dict[str, Any]:
 
 def timeline(case_path: str | Path) -> list[dict[str, Any]]:
     root, _ = load_case(case_path)
-    audit = read_jsonl(root / "audit" / "events.jsonl")
+    return timeline_from_events(read_jsonl(root / "audit" / "events.jsonl"))
+
+
+def timeline_from_events(audit: list[dict[str, Any]]) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     for event in audit:
         action = event.get("action", "event")
