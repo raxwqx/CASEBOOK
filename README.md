@@ -12,7 +12,7 @@
 
 **Preserve evidence. Record decisions. Verify integrity. Export a report.**
 
-CASEBOOK is a local, terminal-based workspace for organizing digital investigation cases. It preserves original inputs, hashes evidence with SHA-256, validates ZIP imports, records analyst notes and findings, verifies a local hash-chained audit journal, and generates portable reports.
+CASEBOOK is a local, terminal-based workspace for organizing digital investigation cases. It preserves original inputs, hashes evidence with SHA-256, validates ZIP imports, records analyst notes and findings, verifies a local hash-chained audit journal, generates portable reports, and can export a read-only case digest manifest for external anchoring.
 
 [English](#english) · [Türkçe](#turkce) · [Quick start](#quick-start) · [Command reference](#command-reference) · [Security model](#security-model-and-limitations)
 
@@ -65,6 +65,8 @@ RECORD NOTES, EVENTS AND FINDINGS
 VERIFY FILES, INDEXES AND AUDIT CHAIN
     ↓
 EXPORT HTML / MARKDOWN / JSON REPORT
+    ↓
+EXPORT EXTERNAL SHA-256 DIGEST MANIFEST (OPTIONAL)
 ```
 
 ## Who is it for?
@@ -89,7 +91,8 @@ Only handle evidence you are authorized to possess and process. Use synthetic da
 | Hash-chained audit journal | Each journal event includes a digest and a link to the preceding event; verification checks the sequence and links. |
 | Investigation notes and timeline | Records analyst-authored notes with a type and UTC-normalized event time, then displays a chronologically sorted timeline. |
 | Evidence-linked findings | Findings can include severity, status, description and references to evidence IDs already in the case. |
-| Portable reports | Exports a standalone HTML report or Markdown/JSON report data. Existing report paths are not silently overwritten. |
+| Portable reports | Exports a standalone HTML report or Markdown/JSON report data. Existing report paths are not silently overwritten, and default filenames stay unique even when several reports are created in the same second. |
+| External digest manifest | Exports a read-only snapshot of case metadata, evidence hashes, derived members, findings, notes and the audit-chain head. `casebook digest --verify` compares a stored manifest with the current case without modifying it. |
 | Local-first operation | No CASEBOOK network requests, telemetry, accounts, remote APIs, or third-party runtime dependencies. |
 | Regression tests and CI configuration | Includes a standard-library `unittest` suite and a GitHub Actions matrix configured for supported Python versions on Linux, macOS and Windows. |
 
@@ -129,9 +132,13 @@ casebook report CASE-001 --format html
 # 5. Review case metadata and timeline
 casebook show CASE-001
 casebook timeline CASE-001
+
+# 6. Anchor the case snapshot outside the case directory
+casebook digest CASE-001 --out ../CASE-001.digest.json
+casebook digest CASE-001 --verify ../CASE-001.digest.json
 ```
 
-The HTML report is written into the case's `reports/` directory unless you provide `--out`. Keep the report and the case data protected: reports may disclose filenames, observations, findings and other sensitive details.
+The HTML report is written into the case's `reports/` directory unless you provide `--out`. Keep the report and the case data protected: reports may disclose filenames, observations, findings and other sensitive details. Keep an exported digest manifest outside the case directory and in storage you trust.
 
 ### First-run alternative: enter the case directory
 
@@ -141,6 +148,7 @@ cd CASE-001
 casebook add . ../examples/casebook-demo-bundle.zip --source "synthetic demo"
 casebook verify .
 casebook report . --format html
+casebook digest . --out ../CASE-001.digest.json
 ```
 
 In the second example, the relative path assumes `CASE-001/` and `examples/` are siblings under the project directory.
@@ -243,7 +251,7 @@ casebook doctor CASE-001
 
 ## Command reference
 
-Run `casebook --help` for the complete parser-generated help available in your installed version. The reference below documents the commands implemented in version 1.0.0.
+Run `casebook --help` for the complete parser-generated help available in your installed version. The reference below documents the commands implemented in version 1.1.0.
 
 | Command | Purpose |
 |---|---|
@@ -258,6 +266,8 @@ Run `casebook --help` for the complete parser-generated help available in your i
 | `casebook timeline [CASE]` | Display a case timeline. |
 | `casebook finding add [CASE] --title TEXT --severity LEVEL --description TEXT [--status STATUS] [--evidence EVD-ID]...` | Record an analyst finding, optionally linked to existing evidence IDs. |
 | `casebook report [CASE] [--format html\|markdown\|md\|json] [--out PATH]` | Generate a report. The default format is `html`. |
+| `casebook digest [CASE] --out FILE` | Export a read-only SHA-256 digest manifest. The destination must not already exist. |
+| `casebook digest [CASE] --verify FILE` | Verify a stored digest manifest against the current case without modifying it. |
 | `casebook doctor [CASE]` | Check the local runtime; if a case is supplied, also verify its integrity. |
 
 ### `init` — create a case
@@ -325,7 +335,20 @@ casebook report CASE-002 --format markdown --out ./case-002-report.md
 casebook report CASE-002 --format json --out ./case-002-report.json
 ```
 
-Supported formats are `html`, `markdown`, the alias `md`, and `json`. If `--out` is omitted, CASEBOOK chooses a filename under the case's `reports/` directory. Existing output paths are not overwritten. A report can still be generated when integrity issues exist, but the command returns a non-zero status and the report warns about the issues; review it before use.
+Supported formats are `html`, `markdown`, the alias `md`, and `json`. If `--out` is omitted, CASEBOOK chooses a unique filename under the case's `reports/` directory, including microsecond precision and a collision suffix when necessary. Existing output paths are not overwritten. A report can still be generated when integrity issues exist, including when an index file is damaged: the report marks the failure, lists the collection problem, and preserves the readable records. The command returns a non-zero status and the report warns about the issues; review it before use.
+
+### `digest` — anchor a completed case externally
+
+```bash
+casebook digest CASE-002 --out ../CASE-002.digest.json
+casebook digest CASE-002 --verify ../CASE-002.digest.json
+```
+
+`--out` writes a new, read-only JSON manifest containing the case metadata, evidence register, derived members, findings, notes and the current audit-chain head, then hashes that snapshot. Export refuses to overwrite an existing file and records the export in the audit journal.
+
+`--verify` is read-only. It hashes the manifest again, compares every recorded snapshot section with the current case, re-checks current case integrity, and confirms that the anchored audit-chain prefix is still present. It does not repair, rewrite or append to the case. A passing result therefore means the stored manifest and the current case still describe the same evidence records and audit prefix; it does not add a digital signature or a trusted timestamp.
+
+Keep the manifest outside the case directory. If a case is later updated (for example, a new note is added), an older digest will correctly report that the snapshot is no longer identical. Export a new manifest only after deciding that the new state is the one you want to anchor.
 
 ### `NO_COLOR` — disable ANSI color output
 
@@ -369,6 +392,7 @@ casebook show LAB-001
 casebook timeline LAB-001
 casebook verify LAB-001
 casebook report LAB-001 --format html
+casebook digest LAB-001 --out ../LAB-001.digest.json
 casebook doctor LAB-001
 ```
 
@@ -396,7 +420,7 @@ CASE-001/
 └── reports/                        # Exported HTML, Markdown or JSON reports
 ```
 
-JSON Lines means each line is a complete JSON object. Do not edit the index files manually or separately from the audit journal: CASEBOOK is designed to report divergence between these records.
+JSON Lines means each line is a complete JSON object. Do not edit the index files manually or separately from the audit journal: CASEBOOK is designed to report divergence between these records. An exported digest manifest is intentionally stored outside this directory; it is a separate anchor, not part of the case layout.
 
 ## Evidence ZIP format
 
@@ -422,10 +446,10 @@ casebook-bundle.zip
 - Keep credentials, API keys, tokens, private messages and real personal data out of public examples.
 - Prefer regular files. Symbolic links and special entries are rejected.
 - Do not include executable setup scripts that ask a recipient to run them.
-- Treat `manifest.json` as **untrusted descriptive text**. Version 1.0.0 does not execute it or use it as trusted instructions.
+- Treat `manifest.json` as **untrusted descriptive text**. Version 1.1.0 does not execute it or use it as trusted instructions.
 - Keep the original ZIP and its derived files distinct. CASEBOOK preserves the input archive and extracts accepted members into a separate evidence tree.
 
-### ZIP import safety limits in version 1.0.0
+### ZIP import safety limits in version 1.1.0
 
 | Limit | Default |
 |---|---:|
@@ -435,7 +459,7 @@ casebook-bundle.zip
 | Total uncompressed member size | 512 MiB maximum |
 | Compression ratio for one member | 200:1 maximum |
 
-The importer also rejects absolute paths, traversal paths, Windows drive-qualified paths, duplicate case-insensitive member paths, encrypted members, symbolic links and special-file entries. These safeguards reduce common archive extraction risks; they do **not** prove that every malicious archive is harmless. Do not import archives from untrusted sources into an important case without appropriate isolation and backups.
+The importer also rejects absolute paths, traversal paths, Windows drive-qualified paths, Windows device names and other names that cannot be created safely on Windows (including forbidden characters, control characters, and components ending in a space or dot), duplicate case-insensitive member paths, encrypted members, symbolic links and special-file entries. These safeguards reduce common archive extraction risks; they do **not** prove that every malicious archive is harmless. Do not import archives from untrusted sources into an important case without appropriate isolation and backups.
 
 ## Integrity verification explained
 
@@ -447,12 +471,13 @@ The importer also rejects absolute paths, traversal paths, Windows drive-qualifi
 4. **Index parity:** checks that evidence, note and finding indexes correspond to the records embedded in audit events.
 5. **Audit chain:** checks sequence numbers, previous-event links and recomputed event digests.
 6. **Case metadata:** checks selected initialization metadata against the initial audit record.
+7. **External digest manifest (optional):** `casebook digest --verify` compares a separately stored snapshot with the current case and its audit-chain prefix.
 
 ### What a passing result means
 
 A passing result means the records CASEBOOK knows about are mutually consistent with the hashes and structure it verifies at that time. It does **not** prove provenance, authorship, original creation time, factual accuracy, absence of malware, or legal admissibility. An attacker who can rewrite the full local case may be able to replace records and recompute hashes.
 
-For stronger preservation, keep a final case digest outside the case directory in a trusted location, restrict write access, use protected or immutable storage where appropriate, and document acquisition and transfer procedures separately.
+For stronger preservation, export a final digest manifest with `casebook digest CASE --out FILE`, keep it outside the case directory in a trusted location, restrict write access, use protected or immutable storage where appropriate, and document acquisition and transfer procedures separately. The manifest is not digitally signed; it is an external record of the local snapshot.
 
 ## Reports
 
@@ -464,7 +489,7 @@ CASEBOOK supports three report data formats, with `md` as an alias for Markdown:
 | Markdown | A text-based report suitable for repositories, notes, review and version-controlled documentation. |
 | JSON | Structured report data for downstream processing or custom tooling. |
 
-The report contains the case summary, evidence register, findings, timeline/audit context and an integrity summary. Review the report before sharing it because it may contain confidential investigation details. Generated reports are not digitally signed.
+The report contains the case summary, evidence register, findings, timeline/audit context and an integrity summary. If an index cannot be parsed, the report still records the readable data, lists the collection problem and reports the integrity failure instead of aborting. Default report names include microsecond precision and a collision suffix, so multiple reports created in quick succession do not overwrite or block each other. Review the report before sharing it because it may contain confidential investigation details. Generated reports are not digitally signed.
 
 ## Security model and limitations
 
@@ -475,6 +500,7 @@ The report contains the case summary, evidence register, findings, timeline/audi
 - Evidence files are copied and hashed; mismatched source/stored digests prevent the evidence record from being committed.
 - Report rendering escapes untrusted text in HTML output.
 - Existing report destinations are not silently overwritten.
+- Digest manifests are written with exclusive creation and are never silently overwritten. Export does not modify evidence or indexes; it records the export as an audit event. Verification never writes to the case.
 - The program does not make network requests or send telemetry.
 
 ### Trust boundaries
@@ -486,6 +512,7 @@ The report contains the case summary, evidence register, findings, timeline/audi
 | Audit journal | Hash-chained but not signed or externally anchored. A sufficiently privileged local actor may rewrite the chain. |
 | Analyst notes/findings | Human-authored interpretation. CASEBOOK does not validate whether the interpretation is correct. |
 | Reports | Portable exports that may reveal sensitive data. Inspect them before distribution. |
+| External digest manifest | A hash snapshot, not a signature or trusted timestamp. Store it outside the case and protect it; anyone who can rewrite both the case and the manifest can make them agree. |
 
 ### Responsible-use statement
 
@@ -515,7 +542,7 @@ On Windows PowerShell, use `$env:PYTHONPATH = "src"` before the unittest command
 
 ### Test coverage areas
 
-The 41 test methods in the current suite cover:
+The 59 test methods in the current suite cover:
 
 - case initialization and expected directory structure;
 - original file copying, hashing and evidence ID assignment;
@@ -525,9 +552,12 @@ The 41 test methods in the current suite cover:
 - evidence, derived-file, metadata, index and audit tampering detection;
 - note ordering, finding validation and evidence links;
 - report generation, output collision handling and HTML escaping;
+- report generation from damaged indexes, unique default filenames and defensive numeric rendering;
+- Windows-safe archive and evidence names, highest-ID record allocation and durable JSONL appends;
+- external digest export/verification, manifest tampering and truncated audit-anchor detection;
 - CLI command workflows, expected errors, banner output and integrity verification.
 
-**Last local test run recorded for this README:** `41 tests`, all passed using `PYTHONPATH=src python3 -m unittest discover -s tests -v`. This is a local result for the current code checkout, not a claim that a remote GitHub Actions workflow has already passed on every matrix combination.
+**Last local test run recorded for this README:** `59 tests`, all passed using `PYTHONPATH=src python3 -m unittest discover -s tests -v`. This is a local result for the current code checkout, not a claim that a remote GitHub Actions workflow has already passed on every matrix combination.
 
 ### Continuous integration
 
@@ -535,7 +565,7 @@ The workflow in [`.github/workflows/tests.yml`](.github/workflows/tests.yml) is 
 
 - Operating systems: Ubuntu, Windows and macOS runners.
 - Python versions: 3.10, 3.11, 3.12 and 3.13.
-- Editable install, syntax compilation, the `unittest` suite and the module version entry point.
+- Editable install, syntax compilation, the `unittest` suite, the module version entry point and a digest export/verification smoke test.
 
 Check the [Actions tab](https://github.com/raxwqx/CASEBOOK/actions) for the latest remote run status.
 
@@ -548,6 +578,7 @@ casebook CLI (argparse)
 ├── core.py        case lifecycle, evidence records, notes, findings and verification
 ├── archive.py     ZIP validation, extraction limits and derived-file hashes
 ├── integrity.py   SHA-256 helpers, JSONL records and audit hash chain
+├── digest.py      external read-only digest manifests and verification
 └── reports.py     HTML, Markdown and JSON renderers
 ```
 
@@ -560,6 +591,7 @@ casebook CLI (argparse)
 - **Fail closed for unsafe archive structures:** reject known dangerous entry patterns and configured resource-limit violations.
 - **Human interpretation remains explicit:** observations, findings and automated integrity checks are distinct concepts.
 - **Portable data:** UTF-8 JSON/JSONL storage and reports suitable for offline review.
+- **External anchoring stays explicit:** digest manifests are opt-in, stored outside the case and never described as signatures or trusted timestamps.
 
 More detail: [Architecture](docs/ARCHITECTURE.md) · [Case and ZIP formats](docs/FORMAT.md) · [Methodology](docs/METHODOLOGY.md) · [Security policy](SECURITY.md)
 
@@ -596,13 +628,17 @@ Preserve the current case directory before investigating. Review the listed issu
 
 ### The report exists already
 
-CASEBOOK avoids overwriting an existing report. Choose a new path with `--out`, or move the previous report aside after you have preserved any version you need.
+CASEBOOK avoids overwriting an existing report. Choose a new path with `--out`, or move the previous report aside after you have preserved any version you need. Default report names are unique, so simply rerunning `casebook report` without `--out` creates a new file.
+
+### `casebook digest --verify` fails
+
+Preserve both the case and the stored manifest. Read each reported problem: changed evidence bytes, a modified index, a rewritten manifest or a truncated audit journal all produce a failed result. Do not edit the manifest to make verification pass. Compare against trusted backups and, if the current case state is the one you intend to anchor, export a new manifest after documenting why the earlier snapshot no longer applies.
 
 ## Roadmap and status
 
-**Current release line: 1.0.0.** The implemented baseline is local case management, evidence hashing, defensive ZIP import, notes/timeline, findings, integrity checks and report export.
+**Current release line: 1.1.0.** The implemented baseline is local case management, evidence hashing, defensive ZIP import, notes/timeline, findings, integrity checks, report export and external digest manifests.
 
-Possible future directions, subject to design and tests, include signed export manifests, schema migration helpers and explicitly versioned adapters for known tool-output formats. These are ideas, **not features promised by the current release**. CASEBOOK does not currently provide native parsers for SPECTRA, ORBIT, TIDEWATCH or other tools; their output must be handled as files using the supported import workflow unless a verified adapter is added in a future version.
+Possible future directions, subject to design and tests, include signed digest manifests, schema migration helpers and explicitly versioned adapters for known tool-output formats. These are ideas, **not features promised by the current release**. CASEBOOK does not currently provide native parsers for SPECTRA, ORBIT, TIDEWATCH or other tools; their output must be handled as files using the supported import workflow unless a verified adapter is added in a future version.
 
 ## Contributing, security reports and license
 
@@ -643,7 +679,7 @@ Released under the [MIT License](LICENSE).
 
 ## CASEBOOK nedir?
 
-CASEBOOK, dijital adli bilişim ve olay müdahalesi (DFIR) çalışmaları için tasarlanmış, **öncelikle çevrimdışı çalışan yerel bir vaka ve delil bütünlüğü yardımcısıdır**. Orijinal dosyaları, türetilmiş dosyaları, edinim bağlamını, analist notlarını, bulguları, zaman çizelgesini, denetim günlüğünü ve raporları tek bir standart klasör yapısında toplar.
+CASEBOOK, dijital adli bilişim ve olay müdahalesi (DFIR) çalışmaları için tasarlanmış, **öncelikle çevrimdışı çalışan yerel bir vaka ve delil bütünlüğü yardımcısıdır**. Orijinal dosyaları, türetilmiş dosyaları, edinim bağlamını, analist notlarını, bulguları, zaman çizelgesini, denetim günlüğünü ve raporları tek bir standart klasör yapısında toplar; tamamlanan bir vakanın harici olarak sabitlenebilmesi için salt-okunur bir özet manifestosu da dışa aktarabilir.
 
 Uzman analiz araçlarının **yerine geçmek için değil, onların yanında çalışmak için** tasarlanmıştır. Örneğin bir ağ analiz aracı veya günlük inceleme aracından alınan JSON/metin çıktısını CASEBOOK'a delil olarak ekleyebilir, kaynağını kaydedebilir ve bulgunun yorumunu belgeleyebilirsin. CASEBOOK kayıtları düzenler ve bütünlüklerini denetler; dosyayı üreten analiz motorunun yerini almaz.
 
@@ -661,6 +697,8 @@ NOTLARI, OLAYLARI VE BULGULARI KAYDET
 DOSYALARI, İNDEKSLERİ VE DENETİM ZİNCİRİNİ DOĞRULA
     ↓
 HTML / MARKDOWN / JSON RAPORU ÜRET
+    ↓
+HARİCİ SHA-256 ÖZET MANİFESTOSU DIŞA AKTAR (İSTEĞE BAĞLI)
 ```
 
 <a id="kimler-icin-tasarlandi"></a>
@@ -689,7 +727,8 @@ Yalnızca işlemeye yetkili olduğun dosyaları kullan. Gösterim ve testlerde s
 | Hash zincirli denetim günlüğü | Her olay önceki olayla bağlantılı bir özet taşır; doğrulama sıralamayı ve bağlantıları kontrol eder. |
 | Notlar ve zaman çizelgesi | Analist notlarını türü ve UTC'ye normalize edilmiş olay zamanı ile kaydeder. |
 | Delille ilişkilendirilen bulgular | Önem derecesi, durum, açıklama ve mevcut delil kimlikleriyle ilişkilendirilmiş analist bulguları tutar. |
-| Taşınabilir raporlar | Bağımsız HTML, Markdown veya JSON raporları oluşturur; var olan dosyaların üzerine sessizce yazmaz. |
+| Taşınabilir raporlar | Bağımsız HTML, Markdown veya JSON raporları oluşturur; var olan dosyaların üzerine sessizce yazmaz ve aynı saniyede üretilen varsayılan dosya adları benzersiz kalır. |
+| Harici özet manifestosu | Vaka metadatası, delil hash'leri, türetilmiş üyeler, bulgular, notlar ve denetim zinciri başının salt-okunur anlık görüntüsünü dışa aktarır. `casebook digest --verify`, saklanan manifestoyu vakayı değiştirmeden mevcut durumla karşılaştırır. |
 | Yerel çalışma | CASEBOOK ağ isteği, telemetri, kullanıcı hesabı, uzak API veya üçüncü taraf çalışma zamanı bağımlılığı kullanmaz. |
 | Test ve CI altyapısı | Python'ın yerleşik `unittest` testlerini ve Linux/macOS/Windows için yapılandırılmış GitHub Actions matrisini içerir. |
 
@@ -733,9 +772,13 @@ casebook report CASE-001 --format html
 # 5. Vaka özetini ve zaman çizelgesini incele
 casebook show CASE-001
 casebook timeline CASE-001
+
+# 6. Vaka anlık görüntüsünü vaka klasörü dışında sabitle
+casebook digest CASE-001 --out ../CASE-001.digest.json
+casebook digest CASE-001 --verify ../CASE-001.digest.json
 ```
 
-`--out` verilmediyse HTML raporu vakanın `reports/` klasörüne kaydedilir. Raporlar dosya adlarını, gözlemleri, bulguları ve hassas inceleme ayrıntılarını içerebilir; paylaşmadan önce kontrol et.
+`--out` verilmediyse HTML raporu vakanın `reports/` klasörüne kaydedilir. Raporlar dosya adlarını, gözlemleri, bulguları ve hassas inceleme ayrıntılarını içerebilir; paylaşmadan önce kontrol et. Dışa aktarılan özet manifestosunu vaka klasörünün dışında ve güvendiğin bir depolama alanında sakla.
 
 ### Alternatif: vaka klasörüne girerek kullan
 
@@ -745,6 +788,7 @@ cd CASE-001
 casebook add . ../examples/casebook-demo-bundle.zip --source "sentetik demo"
 casebook verify .
 casebook report . --format html
+casebook digest . --out ../CASE-001.digest.json
 ```
 
 Bu örnekte `CASE-001/` klasörü ile `examples/` klasörünün proje dizini altında kardeş klasörler olduğu varsayılır.
@@ -851,7 +895,7 @@ casebook doctor CASE-001
 
 ## Komut kataloğu
 
-Kurulu sürümdeki tam seçenekleri görmek için `casebook --help` komutunu çalıştır. Aşağıdaki tablo 1.0.0 sürümünde uygulanan komutları açıklar.
+Kurulu sürümdeki tam seçenekleri görmek için `casebook --help` komutunu çalıştır. Aşağıdaki tablo 1.1.0 sürümünde uygulanan komutları açıklar.
 
 | Komut | Amacı |
 |---|---|
@@ -866,6 +910,8 @@ Kurulu sürümdeki tam seçenekleri görmek için `casebook --help` komutunu ça
 | `casebook timeline [CASE]` | Vaka zaman çizelgesini gösterir. |
 | `casebook finding add [CASE] --title TEXT --severity LEVEL --description TEXT [--status STATUS] [--evidence EVD-ID]...` | İsteğe bağlı olarak mevcut delil kimliklerine bağlanan bir bulgu ekler. |
 | `casebook report [CASE] [--format html\|markdown\|md\|json] [--out PATH]` | Rapor üretir. Varsayılan biçim `html` olur. |
+| `casebook digest [CASE] --out FILE` | Salt-okunur SHA-256 özet manifestosu dışa aktarır. Hedef dosya önceden var olmamalıdır. |
+| `casebook digest [CASE] --verify FILE` | Saklanan özet manifestosunu vakayı değiştirmeden mevcut durumla doğrular. |
 | `casebook doctor [CASE]` | Ortamı denetler; vaka yolu verilirse vakanın bütünlüğünü de kontrol eder. |
 
 ### `init` — vaka oluşturma
@@ -933,7 +979,20 @@ casebook report CASE-002 --format markdown --out ./case-002-report.md
 casebook report CASE-002 --format json --out ./case-002-report.json
 ```
 
-Desteklenen biçimler `html`, `markdown`, `md` kısaltması ve `json` olur. `--out` verilmezse vaka içindeki `reports/` klasöründe bir dosya adı seçilir. Var olan hedef dosyanın üzerine yazılmaz. Bütünlük sorunu varsa rapor yine üretilebilir; ancak komut sıfır dışı çıkış kodu döndürür ve raporda uyarı bulunur. Kullanımdan önce raporu incele.
+Desteklenen biçimler `html`, `markdown`, `md` kısaltması ve `json` olur. `--out` verilmezse vaka içindeki `reports/` klasöründe benzersiz bir dosya adı seçilir; ad mikrosaniye hassasiyeti ve gerektiğinde çakışma eki içerir. Var olan hedef dosyanın üzerine yazılmaz. Bütünlük sorunu varsa, bir indeks dosyası hasarlı olsa bile rapor üretilebilir: rapor hatayı işaretler, toplama sorununu listeler ve okunabilen kayıtları korur. Komut sıfır dışı çıkış kodu döndürür ve raporda uyarı bulunur. Kullanımdan önce raporu incele.
+
+### `digest` — tamamlanan vakayı harici olarak sabitleme
+
+```bash
+casebook digest CASE-002 --out ../CASE-002.digest.json
+casebook digest CASE-002 --verify ../CASE-002.digest.json
+```
+
+`--out`, vaka metadatasını, delil kayıtlarını, türetilmiş üyeleri, bulguları, notları ve mevcut denetim zinciri başını içeren yeni ve salt-okunur bir JSON manifestosu yazar, ardından bu anlık görüntünün hash'ini hesaplar. Dışa aktarma var olan bir dosyanın üzerine yazmaz ve işlemi denetim günlüğüne kaydeder.
+
+`--verify` salt-okunur çalışır. Manifestoyu yeniden hash'ler, kaydedilen her anlık görüntü bölümünü mevcut vakayla karşılaştırır, mevcut vaka bütünlüğünü yeniden denetler ve sabitlenen denetim zinciri önekinin hâlâ mevcut olduğunu doğrular. Vakayı onarmaz, yeniden yazmaz veya vakaya kayıt eklemez. Başarılı sonuç, saklanan manifesto ile mevcut vakanın aynı delil kayıtlarını ve denetim önekini tanımladığı anlamına gelir; dijital imza veya güvenilir zaman damgası eklemez.
+
+Manifestoyu vaka klasörünün dışında sakla. Vaka daha sonra güncellenirse (örneğin yeni bir not eklenirse), eski özet anlık görüntünün artık aynı olmadığını doğru biçimde bildirir. Yeni bir manifestoyu yalnızca yeni durumun sabitlemek istediğin durum olduğuna karar verdikten sonra dışa aktar.
 
 ### `NO_COLOR` — ANSI renklerini kapatma
 
@@ -979,6 +1038,7 @@ casebook show LAB-001
 casebook timeline LAB-001
 casebook verify LAB-001
 casebook report LAB-001 --format html
+casebook digest LAB-001 --out ../LAB-001.digest.json
 casebook doctor LAB-001
 ```
 
@@ -1008,7 +1068,7 @@ CASE-001/
 └── reports/                        # HTML, Markdown veya JSON dışa aktarımları
 ```
 
-JSON Lines biçiminde her satır eksiksiz bir JSON nesnesidir. İndeks dosyalarını denetim günlüğünden bağımsız olarak elle düzenleme; CASEBOOK bu kayıtlar arasındaki uyumsuzluğu bildirmek üzere tasarlanmıştır.
+JSON Lines biçiminde her satır eksiksiz bir JSON nesnesidir. İndeks dosyalarını denetim günlüğünden bağımsız olarak elle düzenleme; CASEBOOK bu kayıtlar arasındaki uyumsuzluğu bildirmek üzere tasarlanmıştır. Dışa aktarılan özet manifestosu bilinçli olarak bu klasörün dışında saklanır; vaka yapısının parçası değil, ayrı bir çapadır.
 
 <a id="delil-zip-bicimi"></a>
 
@@ -1036,10 +1096,10 @@ casebook-bundle.zip
 - Kimlik bilgilerini, API anahtarlarını, token'ları, özel mesajları ve gerçek kişisel verileri herkese açık örneklere koyma.
 - Normal dosyaları tercih et. Sembolik bağlantılar ve özel dosya girdileri reddedilir.
 - Alıcıdan çalıştırmasını isteyen çalıştırılabilir kurulum betiklerini pakete ekleme.
-- `manifest.json` dosyasını **güvenilmeyen açıklayıcı metin** olarak gör. 1.0.0 sürümü bunu çalıştırmaz veya güvenilir talimat kabul etmez.
+- `manifest.json` dosyasını **güvenilmeyen açıklayıcı metin** olarak gör. 1.1.0 sürümü bunu çalıştırmaz veya güvenilir talimat kabul etmez.
 - Orijinal ZIP'i çıkarılan dosyalardan ayrı tut. CASEBOOK giriş arşivini korur ve kabul edilen üyeleri ayrı bir delil ağacına çıkarır.
 
-### 1.0.0 sürümündeki ZIP sınırları
+### 1.1.0 sürümündeki ZIP sınırları
 
 | Sınır | Varsayılan değer |
 |---|---:|
@@ -1049,7 +1109,7 @@ casebook-bundle.zip
 | Tüm üyelerin toplam açılmış boyutu | En fazla 512 MiB |
 | Tek bir üyenin sıkıştırma oranı | En fazla 200:1 |
 
-İçe aktarıcı ayrıca mutlak yolları, dizin dışına çıkan yolları, Windows sürücü harfiyle başlayan yolları, büyük/küçük harf duyarsız yinelenen üye yollarını, şifreli üyeleri, sembolik bağlantıları ve özel dosya girdilerini reddeder. Bu önlemler yaygın arşiv açma risklerini azaltır; her kötü amaçlı arşivin zararsız olduğunu **kanıtlamaz**. Kaynağı güvenilir olmayan arşivleri önemli bir vakaya almadan önce uygun izolasyon ve yedekleme kullan.
+İçe aktarıcı ayrıca mutlak yolları, dizin dışına çıkan yolları, Windows sürücü harfiyle başlayan yolları, Windows aygıt adlarını ve Windows'ta güvenli biçimde oluşturulamayan diğer adları (yasak karakterler, kontrol karakterleri ve boşluk veya nokta ile biten bileşenler dahil), büyük/küçük harf duyarsız yinelenen üye yollarını, şifreli üyeleri, sembolik bağlantıları ve özel dosya girdilerini reddeder. Bu önlemler yaygın arşiv açma risklerini azaltır; her kötü amaçlı arşivin zararsız olduğunu **kanıtlamaz**. Kaynağı güvenilir olmayan arşivleri önemli bir vakaya almadan önce uygun izolasyon ve yedekleme kullan.
 
 <a id="butunluk-dogrulamasi-nasil-calisir"></a>
 
@@ -1063,12 +1123,13 @@ casebook-bundle.zip
 4. **İndeks tutarlılığı:** Delil, not ve bulgu indekslerinin denetim olaylarında tutulan kayıtlarla eşleşmesini denetler.
 5. **Denetim zinciri:** Sıra numaralarını, önceki olay bağlantılarını ve olay özetlerini kontrol eder.
 6. **Vaka metadatası:** Bazı başlangıç alanlarını ilk denetim kaydıyla karşılaştırır.
+7. **Harici özet manifestosu (isteğe bağlı):** `casebook digest --verify`, ayrı bir konumda saklanan anlık görüntüyü mevcut vaka ve denetim zinciri önekiyle karşılaştırır.
 
 ### Başarılı doğrulama ne anlama gelir?
 
 Başarılı sonuç, o anda CASEBOOK'un tanıdığı ve denetlediği kayıtların, kaydedilmiş özetler ve yapı ile tutarlı olduğu anlamına gelir. Dosyanın kökenini, yazarı, ilk oluşturulma zamanını, içeriğin doğruluğunu, zararsızlığını veya hukuki geçerliliğini kanıtlamaz. Yerel vakanın tamamını yazma yetkisi olan bir kişi kayıtları değiştirip hash'leri yeniden hesaplayabilir.
 
-Daha güçlü koruma için vaka dışındaki güvenilir bir konumda nihai vaka özeti sakla; yazma erişimini sınırla; uygun olduğunda korumalı veya değiştirilemez depolama kullan; edinim ve aktarım adımlarını ayrıca belgele.
+Daha güçlü koruma için `casebook digest CASE --out FILE` ile nihai bir özet manifestosu dışa aktar; dosyayı vaka klasörünün dışında güvenilir bir konumda sakla; yazma erişimini sınırla; uygun olduğunda korumalı veya değiştirilemez depolama kullan; edinim ve aktarım adımlarını ayrıca belgele. Manifesto dijital olarak imzalanmaz; yerel anlık görüntünün harici bir kaydıdır.
 
 <a id="raporlar"></a>
 
@@ -1082,7 +1143,7 @@ CASEBOOK `md` kısaltmasıyla birlikte üç rapor veri biçimini destekler:
 | Markdown | Depolarda, notlarda, incelemede ve sürüm kontrollü belgelerde kullanılabilecek metin raporu. |
 | JSON | Sonraki işleme veya özel araçlar için yapılandırılmış rapor verisi. |
 
-Rapor; vaka özetini, delil listesini, bulguları, zaman çizelgesi/denetim bağlamını ve bütünlük özetini içerir. Raporlar gizli inceleme ayrıntıları taşıyabilir; paylaşmadan önce incele. Üretilen raporlar dijital olarak imzalanmaz.
+Rapor; vaka özetini, delil listesini, bulguları, zaman çizelgesi/denetim bağlamını ve bütünlük özetini içerir. Bir indeks ayrıştırılamazsa rapor yine okunabilen verileri kaydeder, toplama sorununu listeler ve işlemi durdurmak yerine bütünlük hatasını bildirir. Varsayılan rapor adları mikrosaniye hassasiyeti ve çakışma eki içerir; art arda oluşturulan birden fazla rapor birbirinin üzerine yazmaz veya birbirini engellemez. Raporlar gizli inceleme ayrıntıları taşıyabilir; paylaşmadan önce incele. Üretilen raporlar dijital olarak imzalanmaz.
 
 <a id="guvenlik-modeli-ve-sinirlamalar"></a>
 
@@ -1095,6 +1156,7 @@ Rapor; vaka özetini, delil listesini, bulguları, zaman çizelgesi/denetim bağ
 - Delil dosyaları kopyalanır ve hash'lenir; kaynak ile kopyanın hash'i farklıysa kayıt tamamlanmaz.
 - HTML rapor oluşturma sırasında güvenilmeyen metinler kaçışlama işleminden geçirilir.
 - Var olan rapor hedeflerinin üzerine sessizce yazılmaz.
+- Özet manifestoları dışlayıcı oluşturma ile yazılır ve üzerine sessizce yazılmaz. Dışa aktarma delilleri veya indeksleri değiştirmez; yalnızca dışa aktarma işlemini denetim olayı olarak kaydeder. Doğrulama vakaya hiçbir şey yazmaz.
 - Program ağ isteği yapmaz ve telemetri göndermez.
 
 ### Güven sınırları
@@ -1106,6 +1168,7 @@ Rapor; vaka özetini, delil listesini, bulguları, zaman çizelgesi/denetim bağ
 | Denetim günlüğü | Hash zincirlidir; imzalı veya harici güvenilir kaynağa sabitlenmiş değildir. Yerel yazma yetkisi olan biri zinciri yeniden oluşturabilir. |
 | Analist notları/bulguları | İnsan tarafından yazılmış yorumlardır. CASEBOOK bunların doğruluğunu doğrulamaz. |
 | Raporlar | Hassas verileri açığa çıkarabilecek taşınabilir çıktılardır. Dağıtmadan önce denetle. |
+| Harici özet manifestosu | Bir hash anlık görüntüsüdür; imza veya güvenilir zaman damgası değildir. Vaka dışında sakla ve koru; hem vakayı hem manifestoyu yeniden yazabilen biri ikisini uyumlu hâle getirebilir. |
 
 ### Sorumlu kullanım
 
@@ -1137,7 +1200,7 @@ Windows PowerShell'de `unittest` komutundan önce `$env:PYTHONPATH = "src"` ayar
 
 ### Test kapsamındaki alanlar
 
-Mevcut test takımındaki 41 test metodu şu konuları kapsar:
+Mevcut test takımındaki 59 test metodu şu konuları kapsar:
 
 - vaka başlangıcı ve beklenen klasör yapısı;
 - orijinal dosya kopyalama, hash hesaplama ve delil kimliği atama;
@@ -1147,9 +1210,12 @@ Mevcut test takımındaki 41 test metodu şu konuları kapsar:
 - delil, türetilmiş dosya, metadata, indeks ve denetim kaydı değişikliklerinin tespiti;
 - not sıralaması, bulgu doğrulama ve delil bağlantıları;
 - rapor oluşturma, var olan hedefi koruma ve HTML kaçışlama;
+- hasarlı indekslerden rapor üretme, benzersiz varsayılan dosya adları ve savunmacı sayısal gösterim;
+- Windows uyumlu arşiv ve delil adları, en yüksek kimlik numarasına göre kayıt üretimi ve dayanıklı JSONL eklemeleri;
+- harici özet dışa aktarma/doğrulama, manifesto değişikliği ve kesilmiş denetim çapası tespiti;
 - CLI iş akışları, beklenen hatalar, başlangıç ekranı ve bütünlük doğrulaması.
 
-**Bu README için son yerel test sonucu:** `PYTHONPATH=src python3 -m unittest discover -s tests -v` komutu ile `41 tests` çalıştı ve tamamı geçti. Bu, mevcut kaynak kodu üzerindeki yerel sonuçtur; uzak GitHub Actions iş akışının tüm matris kombinasyonlarında geçtiği iddiası değildir.
+**Bu README için son yerel test sonucu:** `PYTHONPATH=src python3 -m unittest discover -s tests -v` komutu ile `59 tests` çalıştı ve tamamı geçti. Bu, mevcut kaynak kodu üzerindeki yerel sonuçtur; uzak GitHub Actions iş akışının tüm matris kombinasyonlarında geçtiği iddiası değildir.
 
 ### Sürekli entegrasyon (CI)
 
@@ -1157,7 +1223,7 @@ Mevcut test takımındaki 41 test metodu şu konuları kapsar:
 
 - İşletim sistemleri: Ubuntu, Windows ve macOS.
 - Python sürümleri: 3.10, 3.11, 3.12 ve 3.13.
-- Düzenlenebilir kurulum, sözdizimi derlemesi, `unittest` takımı ve modül sürüm komutu.
+- Düzenlenebilir kurulum, sözdizimi derlemesi, `unittest` takımı, modül sürüm komutu ve özet dışa aktarma/doğrulama duman testi.
 
 Uzak çalıştırmaların en güncel durumunu [Actions sekmesinden](https://github.com/raxwqx/CASEBOOK/actions) kontrol et.
 
@@ -1172,6 +1238,7 @@ casebook CLI (argparse)
 ├── core.py        vaka yaşam döngüsü, deliller, notlar, bulgular ve doğrulama
 ├── archive.py     ZIP doğrulaması, çıkarma sınırları ve türetilmiş dosya hash'leri
 ├── integrity.py   SHA-256 yardımcıları, JSONL kayıtları ve denetim hash zinciri
+├── digest.py      harici salt-okunur özet manifestoları ve doğrulama
 └── reports.py     HTML, Markdown ve JSON rapor oluşturucular
 ```
 
@@ -1184,6 +1251,7 @@ casebook CLI (argparse)
 - **Güvensiz arşivlerde güvenli tarafta kalma:** bilinen tehlikeli girdi biçimleri ve kaynak limitleri reddedilir.
 - **İnsan yorumunu ayrı tutma:** gözlemler, bulgular ve otomatik bütünlük denetimleri birbirinden ayrıdır.
 - **Taşınabilir veri:** çevrimdışı incelemeye uygun UTF-8 JSON/JSONL kayıtları ve raporlar.
+- **Harici çapa açık ve isteğe bağlıdır:** özet manifestoları kullanıcı tarafından istenir, vaka dışında saklanır ve imza veya güvenilir zaman damgası olarak tanımlanmaz.
 
 Daha fazla ayrıntı: [Mimari](docs/ARCHITECTURE.md) · [Vaka ve ZIP biçimleri](docs/FORMAT.md) · [Yöntem](docs/METHODOLOGY.md) · [Güvenlik politikası](SECURITY.md)
 
@@ -1222,15 +1290,19 @@ Hata mesajını ve paket yapısını incele. CASEBOOK mutlak/dizin dışına ç�
 
 ### Rapor dosyası zaten var
 
-CASEBOOK var olan raporun üzerine yazmaz. `--out` ile yeni bir yol belirle veya gerekli eski raporu koruduktan sonra başka yere taşı.
+CASEBOOK var olan raporun üzerine yazmaz. `--out` ile yeni bir yol belirle veya gerekli eski raporu koruduktan sonra başka yere taşı. Varsayılan rapor adları benzersizdir; `--out` vermeden `casebook report` komutunu yeniden çalıştırmak yeni bir dosya oluşturur.
+
+### `casebook digest --verify` başarısız
+
+Hem vakayı hem de saklanan manifestoyu koru. Bildirilen her sorunu oku: değişmiş delil baytları, değiştirilmiş bir indeks, yeniden yazılmış bir manifesto veya kesilmiş denetim günlüğü başarısız sonuç üretir. Doğrulamayı geçirmek için manifestoyu elle düzenleme. Güvenilir yedeklerle karşılaştır ve mevcut vaka durumunu sabitlemek istiyorsan, önceki anlık görüntünün neden artık geçerli olmadığını belgeledikten sonra yeni bir manifesto dışa aktar.
 
 <a id="surum-durumu-ve-yol-haritasi"></a>
 
 ## Sürüm durumu ve yol haritası
 
-**Mevcut sürüm hattı: 1.0.0.** Uygulanan temel özellikler yerel vaka yönetimi, delil hash'leme, savunmacı ZIP içe aktarma, notlar/zaman çizelgesi, bulgular, bütünlük denetimleri ve rapor dışa aktarmadır.
+**Mevcut sürüm hattı: 1.1.0.** Uygulanan temel özellikler yerel vaka yönetimi, delil hash'leme, savunmacı ZIP içe aktarma, notlar/zaman çizelgesi, bulgular, bütünlük denetimleri, rapor dışa aktarma ve harici özet manifestolarıdır.
 
-Gelecekte değerlendirilebilecek geliştirmeler arasında imzalı dışa aktarma manifestoları, şema geçiş yardımcıları ve bilinen araç çıktı biçimleri için açıkça sürümlenmiş bağdaştırıcılar bulunabilir. Bunlar fikir aşamasındadır; mevcut sürümün sunduğu özellikler değildir. CASEBOOK şu anda SPECTRA, ORBIT, TIDEWATCH veya diğer araçlar için yerleşik ayrıştırıcı sağlamaz. Gelecekte doğrulanmış bir bağdaştırıcı eklenmediği sürece bu araçların çıktıları desteklenen dosya içe aktarma iş akışıyla eklenmelidir.
+Gelecekte değerlendirilebilecek geliştirmeler arasında imzalı özet manifestoları, şema geçiş yardımcıları ve bilinen araç çıktı biçimleri için açıkça sürümlenmiş bağdaştırıcılar bulunabilir. Bunlar fikir aşamasındadır; mevcut sürümün sunduğu özellikler değildir. CASEBOOK şu anda SPECTRA, ORBIT, TIDEWATCH veya diğer araçlar için yerleşik ayrıştırıcı sağlamaz. Gelecekte doğrulanmış bir bağdaştırıcı eklenmediği sürece bu araçların çıktıları desteklenen dosya içe aktarma iş akışıyla eklenmelidir.
 
 <a id="katki-guvenlik-bildirimi-ve-lisans"></a>
 

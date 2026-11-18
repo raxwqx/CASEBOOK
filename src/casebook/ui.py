@@ -48,7 +48,7 @@ def banner() -> None:
         print(Theme.paint(line, Theme.CYAN, Theme.BOLD))
     print(Theme.paint("  C A S E B O O K", Theme.WHITE, Theme.BOLD))
     print(Theme.paint("  OFFLINE-FIRST  /  DIGITAL FORENSICS WORKSPACE", Theme.BLUE))
-    print(Theme.paint("  Evidence integrity  •  Case timeline  •  Reproducible reports", Theme.GRAY))
+    print(Theme.paint("  Evidence integrity  •  Case timeline  •  Portable reports  •  External digest", Theme.GRAY))
     print()
 
 

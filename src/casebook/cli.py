@@ -19,6 +19,7 @@ from .core import (
     timeline as get_timeline,
     verify_case,
 )
+from .digest import export_digest, verify_digest
 from .reports import write_report
 from .ui import Theme, banner, error, info, kv, panel, severity, success, warning
 
@@ -46,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  casebook add . ../evidence.zip --source lab\n"
             "  casebook verify .\n"
             "  casebook report . --format html\n"
+            "  casebook digest . --out ../CASE-001.digest.json\n"
         ),
     )
     parser.add_argument("--version", action="version", version=f"CASEBOOK {__version__}")
@@ -93,6 +95,19 @@ def build_parser() -> argparse.ArgumentParser:
     report_parser.add_argument("--format", choices=["markdown", "md", "json", "html"], default="html")
     report_parser.add_argument("--out", help="Output path (must not already exist)")
 
+    digest_parser = sub.add_parser(
+        "digest",
+        help="Export or verify an external SHA-256 case digest manifest",
+        description=(
+            "Create a read-only snapshot of the case outside its directory, or verify a "
+            "previously exported manifest against the current case."
+        ),
+    )
+    digest_parser.add_argument("case", nargs="?", default=".", help="Case directory (default: current directory)")
+    digest_group = digest_parser.add_mutually_exclusive_group(required=True)
+    digest_group.add_argument("--out", metavar="FILE", help="Write a new digest manifest (must not already exist)")
+    digest_group.add_argument("--verify", metavar="FILE", help="Verify a stored digest manifest without modifying the case")
+
     doctor_parser = sub.add_parser("doctor", help="Check runtime and required casebook files")
     doctor_parser.add_argument("case", nargs="?", help="Optional case directory to inspect")
 
@@ -112,6 +127,7 @@ def _show_home() -> None:
     print("  casebook add . ../evidence.zip --source lab")
     print("  casebook verify .")
     print("  casebook report . --format html")
+    print("  casebook digest . --out ../CASE-001.digest.json")
     print()
     info("Run 'casebook --help' to explore all commands.")
 
@@ -216,9 +232,49 @@ def main(argv: Sequence[str] | None = None) -> int:
                 info("Report integrity snapshot: PASS")
             else:
                 warning("Report generated with integrity issues; inspect the report before relying on it.")
+            if not integrity.get("report_audit_recorded", True):
+                warning("Report was written, but the audit journal could not record the export.")
             kv("Format", args.format.upper())
             kv("Size", f"{path.stat().st_size:,} bytes")
+            if not integrity.get("report_audit_recorded", True):
+                return 2
             return 0 if integrity["ok"] else 2
+
+        if args.command == "digest":
+            if args.out:
+                path, manifest, audit_recorded = export_digest(args.case, args.out)
+                success(f"Digest manifest written: {path}")
+                kv("Case ID", manifest["case"].get("case_id", "unknown"))
+                kv("Manifest SHA-256", manifest["digest"])
+                kv(
+                    "Audit anchor",
+                    f"{manifest['audit']['count']} event(s), {str(manifest['audit']['head_hash'])[:16]}…",
+                )
+                kv(
+                    "Snapshot counts",
+                    ", ".join(f"{key}={value}" for key, value in manifest["counts"].items()),
+                )
+                info("Keep this manifest outside the case and in trusted storage; it is not digitally signed.")
+                if not audit_recorded:
+                    warning("Manifest was written, but the audit journal could not record the export.")
+                    return 2
+                return 0
+            result = verify_digest(args.case, args.verify)
+            (success if result["ok"] else error)(
+                "Digest verification PASSED." if result["ok"] else "Digest verification FAILED."
+            )
+            kv("Case ID", result["case_id"])
+            kv("Manifest generated (UTC)", result["manifest_generated_at"] or "unknown")
+            kv("Manifest SHA-256", result["manifest_digest"])
+            anchor = result["audit_anchor"] if isinstance(result["audit_anchor"], dict) else {}
+            kv("Audit anchor", f"{anchor.get('count', 'unknown')} event(s)")
+            kv("Current counts", ", ".join(f"{key}={value}" for key, value in result["counts"].items()))
+            if result["problems"]:
+                print()
+                for problem in result["problems"]:
+                    error(problem)
+                return 2
+            return 0
 
         if args.command == "doctor":
             checks: list[tuple[str, bool, str]] = [

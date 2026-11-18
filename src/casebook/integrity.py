@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,10 @@ def append_jsonl(path: Path, record: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8", newline="\n") as stream:
         stream.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+        # Flush and sync so a completed command cannot leave a partial or
+        # unsynced journal line behind if the process or host stops abruptly.
+        stream.flush()
+        os.fsync(stream.fileno())
 
 
 def audit_event_hash(event_without_hash: dict[str, Any]) -> str:
