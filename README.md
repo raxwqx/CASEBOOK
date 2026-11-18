@@ -542,7 +542,7 @@ On Windows PowerShell, use `$env:PYTHONPATH = "src"` before the unittest command
 
 ### Test coverage areas
 
-The 59 test methods in the current suite cover:
+The 60 test methods in the current suite cover:
 
 - case initialization and expected directory structure;
 - original file copying, hashing and evidence ID assignment;
@@ -555,9 +555,9 @@ The 59 test methods in the current suite cover:
 - report generation from damaged indexes, unique default filenames and defensive numeric rendering;
 - Windows-safe archive and evidence names, highest-ID record allocation and durable JSONL appends;
 - external digest export/verification, manifest tampering and truncated audit-anchor detection;
-- CLI command workflows, expected errors, banner output and integrity verification.
+- CLI command workflows, expected errors, banner output, non-UTF-8 console fallback and integrity verification.
 
-**Last local test run recorded for this README:** `59 tests`, all passed using `PYTHONPATH=src python3 -m unittest discover -s tests -v`. This is a local result for the current code checkout, not a claim that a remote GitHub Actions workflow has already passed on every matrix combination.
+**Last local test run recorded for this README:** `60 tests`, all passed using `PYTHONPATH=src python3 -m unittest discover -s tests -v`. This is a local result for the current code checkout, not a claim that a remote GitHub Actions workflow has already passed on every matrix combination.
 
 ### Continuous integration
 
@@ -1200,7 +1200,7 @@ Windows PowerShell'de `unittest` komutundan önce `$env:PYTHONPATH = "src"` ayar
 
 ### Test kapsamındaki alanlar
 
-Mevcut test takımındaki 59 test metodu şu konuları kapsar:
+Mevcut test takımındaki 60 test metodu şu konuları kapsar:
 
 - vaka başlangıcı ve beklenen klasör yapısı;
 - orijinal dosya kopyalama, hash hesaplama ve delil kimliği atama;
@@ -1213,9 +1213,9 @@ Mevcut test takımındaki 59 test metodu şu konuları kapsar:
 - hasarlı indekslerden rapor üretme, benzersiz varsayılan dosya adları ve savunmacı sayısal gösterim;
 - Windows uyumlu arşiv ve delil adları, en yüksek kimlik numarasına göre kayıt üretimi ve dayanıklı JSONL eklemeleri;
 - harici özet dışa aktarma/doğrulama, manifesto değişikliği ve kesilmiş denetim çapası tespiti;
-- CLI iş akışları, beklenen hatalar, başlangıç ekranı ve bütünlük doğrulaması.
+- CLI iş akışları, beklenen hatalar, başlangıç ekranı, UTF-8 olmayan konsol geri dönüşü ve bütünlük doğrulaması.
 
-**Bu README için son yerel test sonucu:** `PYTHONPATH=src python3 -m unittest discover -s tests -v` komutu ile `59 tests` çalıştı ve tamamı geçti. Bu, mevcut kaynak kodu üzerindeki yerel sonuçtur; uzak GitHub Actions iş akışının tüm matris kombinasyonlarında geçtiği iddiası değildir.
+**Bu README için son yerel test sonucu:** `PYTHONPATH=src python3 -m unittest discover -s tests -v` komutu ile `60 tests` çalıştı ve tamamı geçti. Bu, mevcut kaynak kodu üzerindeki yerel sonuçtur; uzak GitHub Actions iş akışının tüm matris kombinasyonlarında geçtiği iddiası değildir.
 
 ### Sürekli entegrasyon (CI)
 

@@ -342,6 +342,17 @@ class CasebookTestCase(unittest.TestCase):
         self.assertIn("C A S E B O O K", output.getvalue())
         self.assertIn("casebook init", output.getvalue())
 
+    def test_cli_home_survives_a_legacy_non_utf8_console(self) -> None:
+        buffer = io.BytesIO()
+        stream = io.TextIOWrapper(buffer, encoding="cp1252", errors="strict")
+        with redirect_stdout(stream):
+            code = main([])
+        stream.flush()
+        rendered = buffer.getvalue().decode("cp1252")
+        self.assertEqual(code, 0)
+        self.assertIn("C A S E B O O K", rendered)
+        self.assertIn("casebook init", rendered)
+
     def test_cli_init_and_verify(self) -> None:
         target = self.base / "CLI-CASE"
         output = io.StringIO()

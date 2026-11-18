@@ -9,6 +9,7 @@
 - Hardened report rendering against non-numeric or invalid evidence sizes.
 - Changed note and finding ID allocation to use the highest existing numeric ID instead of the record count.
 - Rejected Windows device names and Windows-incompatible archive/evidence path components consistently on every platform.
+- Added an ASCII banner/panel fallback and replacement output errors so legacy Windows console encodings cannot crash commands.
 - Flushed and synced JSONL appends so completed writes are durable.
 - Expanded the regression suite and updated English/Turkish documentation.
 

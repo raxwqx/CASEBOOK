@@ -21,7 +21,7 @@ from .core import (
 )
 from .digest import export_digest, verify_digest
 from .reports import write_report
-from .ui import Theme, banner, error, info, kv, panel, severity, success, warning
+from .ui import Theme, banner, configure_output, error, info, kv, panel, severity, success, warning
 
 
 def _iso_time(value: str) -> str:
@@ -148,6 +148,7 @@ def _summary(case: dict[str, object], root: Path) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    configure_output()
     parser = build_parser()
     args = parser.parse_args(argv)
     if not args.command:
